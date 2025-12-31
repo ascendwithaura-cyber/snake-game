@@ -1,167 +1,339 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
-  <title>Neon Snake by Gemini</title>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>Classic Snake Game</title>
   <style>
     body {
-      background-color: #1a1a1a;
+      background-color: #222; /* Dark background outside canvas */
+      color: #eee;
+      font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
       display: flex;
       flex-direction: column;
       align-items: center;
       justify-content: center;
       height: 100vh;
       margin: 0;
-      font-family: 'Courier New', Courier, monospace;
-      color: white;
+      overflow: hidden; /* Prevent scrolling on mobile */
+      touch-action: none; /* Disables browser gestures on canvas area */
     }
+    
+    h1 { margin: 0 0 15px 0; font-size: 28px; letter-spacing: 2px; color: #4CAF50; }
+    
+    .scores-container {
+      display: flex;
+      gap: 30px;
+      margin-bottom: 15px;
+      font-size: 18px;
+      font-weight: bold;
+      background: #333;
+      padding: 10px 20px;
+      border-radius: 20px;
+    }
+
     canvas {
-      border: 2px solid #4CAF50;
-      box-shadow: 0 0 20px rgba(76, 175, 80, 0.5);
-      background-color: #000;
+      background-color: #1a1a1a; /* Slightly lighter game background */
+      border: 3px solid #4CAF50;
+      border-radius: 8px;
+      box-shadow: 0 4px 15px rgba(0,0,0,0.6);
+      display: block;
+       /* Ensure crisp edges for pixel art style */
+      image-rendering: pixelated;
     }
-    h1 { margin-bottom: 10px; text-shadow: 0 0 10px #4CAF50; }
-    p { color: #aaa; }
-    #scoreBoard { font-size: 24px; margin-bottom: 20px; }
+
+    #controls-hint { margin-top: 15px; color: #888; font-size: 14px; font-style: italic; }
   </style>
 </head>
 <body>
 
-  <h1>NEON SNAKE</h1>
-  <div id="scoreBoard">Score: 0</div>
-  <canvas id="gameCanvas" width="400" height="400"></canvas>
-  <p>Use Arrow Keys to Move</p>
+  <h1>CLASSIC SNAKE</h1>
+  
+  <div class="scores-container">
+    <div id="scoreText">Score: 0</div>
+    <div id="highScoreText">Best: 0</div>
+  </div>
+
+  <canvas id="gameCanvas"></canvas>
+  <p id="controls-hint">Swipe screen or use Arrow Keys</p>
 
   <script>
+    // --- SETUP ---
     const canvas = document.getElementById('gameCanvas');
     const ctx = canvas.getContext('2d');
-    const scoreElement = document.getElementById('scoreBoard');
+    
+    const boxSize = 24; // Slightly larger grid size for better visuals
+    let tileCountX, tileCountY;
+    
+    // Responsive Canvas Sizing
+    function resizeCanvas() {
+      // Calculate available space, leaving room for header/footer spaces
+      const availableWidth = window.innerWidth - 30;
+      const availableHeight = window.innerHeight - 180;
+      
+      // Calculate how many full tiles fit horizontally and vertically
+      tileCountX = Math.floor(availableWidth / boxSize);
+      tileCountY = Math.floor(availableHeight / boxSize);
 
-    // Game Settings
-    const gridSize = 20;
-    const tileCount = canvas.width / gridSize;
+      canvas.width = tileCountX * boxSize;
+      canvas.height = tileCountY * boxSize;
+    }
+    
+    resizeCanvas();
+    //Debounce resize to prevent spamming calculations
+    let resizeTimeout;
+    window.addEventListener('resize', () => {
+      clearTimeout(resizeTimeout);
+      resizeTimeout = setTimeout(() => {
+          resizeCanvas();
+          if(isGameRunning) placeFood(); // Re-place food if grid changes
+      }, 200);
+    });
+
+
+    // --- GAME VARIABLES ---
     let score = 0;
+    let highScore = localStorage.getItem('snakeHighScoreFinal') || 0;
+    document.getElementById('highScoreText').innerText = "Best: " + highScore;
 
-    // Snake & Food
-    let snake = [{x: 10, y: 10}]; // Start in middle
-    let food = {x: 15, y: 15};
-    
-    // Velocity (Movement)
-    let dx = 0;
-    let dy = 0;
-    
-    // Game Loop
-    function gameLoop() {
-      if(isGameOver()) {
-        alert("Game Over! Your Score: " + score);
-        resetGame();
-        return;
-      }
+    let velocityX = 0;
+    let velocityY = 0;
+    // Start snake in the middle-ish
+    let snake = [{x: Math.floor(tileCountX/2), y: Math.floor(tileCountY/2)}]; 
+    let food = {};
+    let gameInterval;
+    let isGameRunning = false;
 
-      setTimeout(function onTick() {
-        clearCanvas();
-        moveSnake();
-        drawFood();
-        drawSnake();
-        gameLoop();
-      }, 100); // Game Speed (Lower is faster)
-    }
+    // --- MAIN GAME LOOP FUNCTIONS ---
 
-    function clearCanvas() {
-      ctx.fillStyle = 'black';
-      ctx.fillRect(0, 0, canvas.width, canvas.height);
-    }
-
-    function drawSnake() {
-      ctx.fillStyle = '#4CAF50'; // Green Snake
-      ctx.strokeStyle = '#2E7D32';
+    function startGame() {
+      // Reset states
+      snake = [{x: Math.floor(tileCountX/2), y: Math.floor(tileCountY/2)}];
+      velocityX = 0;
+      velocityY = 0;
+      score = 0;
+      document.getElementById('scoreText').innerText = "Score: " + score;
+      placeFood();
+      isGameRunning = true;
       
-      snake.forEach(part => {
-        ctx.fillRect(part.x * gridSize, part.y * gridSize, gridSize - 2, gridSize - 2);
-        ctx.strokeRect(part.x * gridSize, part.y * gridSize, gridSize - 2, gridSize - 2);
-      });
+      if(gameInterval) clearInterval(gameInterval);
+      // 110ms is a good medium speed. Lower = faster.
+      gameInterval = setInterval(update, 110); 
     }
 
-    function drawFood() {
-      ctx.fillStyle = '#FF5252'; // Red Food
-      ctx.fillRect(food.x * gridSize, food.y * gridSize, gridSize - 2, gridSize - 2);
-    }
+    function update() {
+      if(!isGameRunning) return;
 
-    function moveSnake() {
-      // Create new head based on current velocity
-      const head = {x: snake[0].x + dx, y: snake[0].y + dy};
-      snake.unshift(head); // Add new head to start of array
+      // Calculate new head position based on current velocity
+      const headX = snake[0].x + velocityX;
+      const headY = snake[0].y + velocityY;
 
-      // Check if snake ate food
-      if (head.x === food.x && head.y === food.y) {
-        score += 10;
-        scoreElement.innerText = "Score: " + score;
-        generateFood();
-      } else {
-        snake.pop(); // Remove tail if no food eaten
+      // 1. Game Over Conditions
+      // Wall Collision
+      if (headX < 0 || headX >= tileCountX || headY < 0 || headY >= tileCountY) {
+        gameOver(); return;
       }
-    }
-
-    function generateFood() {
-      food = {
-        x: Math.floor(Math.random() * tileCount),
-        y: Math.floor(Math.random() * tileCount)
-      };
-      // Prevent food spawning on snake body
-      snake.forEach(part => {
-        if (part.x === food.x && part.y === food.y) generateFood();
-      });
-    }
-
-    function isGameOver() {
-      let gameOver = false;
-      
-      if (dx === 0 && dy === 0) return false; // Game hasn't started moving
-
-      // Walls
-      if (snake[0].x < 0 || snake[0].x >= tileCount || snake[0].y < 0 || snake[0].y >= tileCount) {
-        gameOver = true;
-      }
-
-      // Self-collision
-      for (let i = 4; i < snake.length; i++) {
-        if (snake[i].x === snake[0].x && snake[i].y === snake[0].y) {
-          gameOver = true;
+      // Self Collision (ignore if snake hasn't started moving yet)
+      if (velocityX !== 0 || velocityY !== 0) {
+          for (let i = 1; i < snake.length; i++) {
+            if (headX === snake[i].x && headY === snake[i].y) {
+              gameOver(); return;
+            }
         }
       }
-      return gameOver;
+
+      // Move Snake: add new head to beginning of array
+      const newHead = {x: headX, y: headY};
+      snake.unshift(newHead); 
+
+      // 2. Eating Food
+      if (headX === food.x && headY === food.y) {
+        score += 10;
+        document.getElementById('scoreText').innerText = "Score: " + score;
+        placeFood();
+        // Don't pop the tail, so snake grows
+      } else {
+        // Remove tail if we didn't eat
+        snake.pop(); 
+      }
+
+      draw();
     }
 
-    function resetGame() {
-      snake = [{x: 10, y: 10}];
-      dx = 0; dy = 0;
-      score = 0;
-      scoreElement.innerText = "Score: 0";
-      gameLoop();
+    function draw() {
+      // Clear Screen specifically with the canvas background color
+      ctx.fillStyle = '#1a1a1a';
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+      // --- Draw Food (Apple 🍎) ---
+      // We use an emoji for the food. We need to center it in the tile grid.
+      ctx.font = `${boxSize-2}px sans-serif`; 
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+      // Calculate center px of the food tile
+      let foodCenterX = food.x * boxSize + (boxSize/2);
+      let foodCenterY = food.y * boxSize + (boxSize/2);
+      // Slight vertical offset for emoji baseline rendering differences across browsers
+      ctx.fillText("🍎", foodCenterX, foodCenterY + 2);
+
+
+      // --- Draw Snake ---
+      for (let i = 0; i < snake.length; i++) {
+        let sX = snake[i].x * boxSize;
+        let sY = snake[i].y * boxSize;
+
+        // Add a 1px border padding so body segments don't merge into a blob
+        let border = 1; 
+
+        if (i === 0) {
+            // == DRAW HEAD ==
+            ctx.fillStyle = '#4CAF50'; // Lighter Green Head
+            ctx.fillRect(sX, sY, boxSize, boxSize);
+
+            // == DRAW EYES ==
+            drawEyes(sX, sY);
+
+        } else {
+            // == DRAW BODY SEGMENT ==
+            ctx.fillStyle = '#388E3C'; // Darker Green Body
+            // Draw slightly smaller than the grid box to create definition
+            ctx.fillRect(sX + border, sY + border, boxSize - (border*2), boxSize - (border*2));
+        }
+      }
     }
 
-    // Input Handling
-    document.addEventListener('keydown', changeDirection);
+    // Helper function to draw eyes looking the right way
+    function drawEyes(headAbsX, headAbsY) {
+        ctx.fillStyle = "white"; // Sclera (whites of eyes)
+        let eyeRadius = boxSize * 0.15; // Eyes scale with box size
+        let pupilRadius = boxSize * 0.07;
+        let offsetFromEdge = boxSize * 0.25;
 
-    function changeDirection(event) {
-      const LEFT_KEY = 37;
-      const RIGHT_KEY = 39;
-      const UP_KEY = 38;
-      const DOWN_KEY = 40;
+        // Default positions (looking down/stationary)
+        let eye1X = headAbsX + offsetFromEdge;
+        let eye1Y = headAbsY + boxSize - offsetFromEdge;
+        let eye2X = headAbsX + boxSize - offsetFromEdge;
+        let eye2Y = headAbsY + boxSize - offsetFromEdge;
 
-      const keyPressed = event.keyCode;
-      const goingUp = dy === -1;
-      const goingDown = dy === 1;
-      const goingRight = dx === 1;
-      const goingLeft = dx === -1;
+        // Adjust based on velocity direction
+        if (velocityX === 1) { // Right
+            eye1X = headAbsX + boxSize - offsetFromEdge; eye1Y = headAbsY + offsetFromEdge;
+            eye2X = headAbsX + boxSize - offsetFromEdge; eye2Y = headAbsY + boxSize - offsetFromEdge;
+        } else if (velocityX === -1) { // Left
+            eye1X = headAbsX + offsetFromEdge; eye1Y = headAbsY + offsetFromEdge;
+            eye2X = headAbsX + offsetFromEdge; eye2Y = headAbsY + boxSize - offsetFromEdge;
+        } else if (velocityY === -1) { // Up
+            eye1X = headAbsX + offsetFromEdge; eye1Y = headAbsY + offsetFromEdge;
+            eye2X = headAbsX + boxSize - offsetFromEdge; eye2Y = headAbsY + offsetFromEdge;
+        }
 
-      if (keyPressed === LEFT_KEY && !goingRight) { dx = -1; dy = 0; }
-      if (keyPressed === UP_KEY && !goingDown) { dx = 0; dy = -1; }
-      if (keyPressed === RIGHT_KEY && !goingLeft) { dx = 1; dy = 0; }
-      if (keyPressed === DOWN_KEY && !goingUp) { dx = 0; dy = 1; }
+        // Draw Eye Whites
+        ctx.beginPath(); ctx.arc(eye1X, eye1Y, eyeRadius, 0, Math.PI*2); ctx.fill();
+        ctx.beginPath(); ctx.arc(eye2X, eye2Y, eyeRadius, 0, Math.PI*2); ctx.fill();
+
+        // Draw Pupils (Black dots shifted slightly in direction of movement)
+        ctx.fillStyle = "black";
+        let pShiftX = velocityX * 2;
+        let pShiftY = velocityY * 2;
+        ctx.beginPath(); ctx.arc(eye1X + pShiftX, eye1Y + pShiftY, pupilRadius, 0, Math.PI*2); ctx.fill();
+        ctx.beginPath(); ctx.arc(eye2X + pShiftX, eye2Y + pShiftY, pupilRadius, 0, Math.PI*2); ctx.fill();
     }
 
-    // Start
-    gameLoop();
+
+    function placeFood() {
+        // Generate random positions until one is not on the snake body
+        let validPosition = false;
+        while(!validPosition) {
+            food = {
+                x: Math.floor(Math.random() * tileCountX),
+                y: Math.floor(Math.random() * tileCountY)
+            };
+            validPosition = true;
+            // Check collision with snake body
+            for(let part of snake) {
+                if(part.x === food.x && part.y === food.y) {
+                    validPosition = false;
+                    break; 
+                }
+            }
+        }
+    }
+
+    function gameOver() {
+      isGameRunning = false;
+      clearInterval(gameInterval);
+      
+      if (score > highScore) {
+        highScore = score;
+        localStorage.setItem('snakeHighScoreFinal', highScore);
+        document.getElementById('highScoreText').innerText = "Best: " + highScore;
+      }
+
+      // Simple delay before restarting so players see how they died
+      setTimeout(() => {
+          alert("GAME OVER\nYour Score: " + score);
+          startGame();
+      }, 100)
+
+    }
+
+    // --- CONTROLS ---
+
+    // 1. Keyboard
+    // Use keydown vs keyup for faster response
+    document.addEventListener('keydown', (evt) => {
+      if(!isGameRunning && (evt.keyCode >= 37 && evt.keyCode <=40)) {
+           // Start game on first arrow press if it was paused at start
+           velocityX = 0; velocityY = 0; // Ensure clean start state
+      }
+      
+      // Prevent reversing direction instantly (e.g., going up then immediately down)
+      switch(evt.keyCode) {
+        case 37: if(velocityX !== 1) { velocityX = -1; velocityY = 0; } break; // Left
+        case 38: if(velocityY !== 1) { velocityX = 0; velocityY = -1; } break; // Up
+        case 39: if(velocityX !== -1) { velocityX = 1; velocityY = 0; } break; // Right
+        case 40: if(velocityY !== -1) { velocityX = 0; velocityY = 1; } break; // Down
+      }
+    });
+
+    // 2. Touch (Swipe)
+    let touchStartX = 0; let touchStartY = 0;
+    const minSwipeDistance = 30; // Minimum pixels to count as a swipe
+
+    canvas.addEventListener('touchstart', function(e) {
+      touchStartX = e.changedTouches[0].screenX;
+      touchStartY = e.changedTouches[0].screenY;
+      e.preventDefault(); // Stop browser scroll
+    }, {passive: false});
+
+    canvas.addEventListener('touchend', function(e) {
+      if(!isGameRunning) return;
+      
+      let touchEndX = e.changedTouches[0].screenX;
+      let touchEndY = e.changedTouches[0].screenY;
+      
+      let diffX = touchEndX - touchStartX;
+      let diffY = touchEndY - touchStartY;
+
+      // Ignore accidental tiny taps
+      if(Math.abs(diffX) < minSwipeDistance && Math.abs(diffY) < minSwipeDistance) return;
+
+      // Determine if swipe was mostly Horizontal or Vertical
+      if (Math.abs(diffX) > Math.abs(diffY)) {
+        // Horizontal swipe
+        if (diffX > 0 && velocityX !== -1) { velocityX = 1; velocityY = 0; } // Right
+        else if (diffX < 0 && velocityX !== 1) { velocityX = -1; velocityY = 0; } // Left
+      } else {
+        // Vertical swipe
+        if (diffY > 0 && velocityY !== -1) { velocityX = 0; velocityY = 1; } // Down
+        else if (diffY < 0 && velocityY !== 1) { velocityX = 0; velocityY = -1; } // Up
+      }
+      e.preventDefault();
+    }, {passive: false});
+
+    //Kick off the game
+    startGame();
+
   </script>
 </body>
 </html>
